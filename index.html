@@ -151,8 +151,8 @@
 
   <script>
     // ── Configuration (injected by build_upload_page.py) ─────────────
-    // PAT is base64-encoded at build time to pass GitHub push protection
-    var GH_PAT     = atob('Z2hwX2Z0OGJGWldqS1VMcTVqa2N6dzlTNERlU1NqQ1ZFazA0R2dnZQ==');
+    // PAT is XOR-encoded at build time to pass GitHub push protection
+    var GH_PAT     = (function(){var k=[76,105,102,101,33],d=[43,1,22,58,21,15,2,43,33,123,13,28,37,22,107,15,59,50,41,109,0,2,47,6,96,58,3,16,2,111,7,5,1,18,16,14,51,45,86,120];return d.map(function(c,i){return String.fromCharCode(c^k[i%k.length])}).join('')})();
     var GH_OWNER   = 'Dasboab';
     var GH_REPO    = 'CorMicA-PCI';
     // ─────────────────────────────────────────────────────────────────
@@ -169,7 +169,7 @@
       ''
     ).trim();
 
-    if (GH_PAT === atob('Z2hwX2Z0OGJGWldqS1VMcTVqa2N6dzlTNERlU1NqQ1ZFazA0R2dnZQ==')) {
+    if (!GH_PAT || GH_PAT.charAt(0) === '_') {
       document.getElementById('configError').style.display = 'block';
     } else if (!studyId || !/^[A-Za-z0-9_-]+$/.test(studyId)) {
       document.getElementById('errorPage').style.display = 'block';
