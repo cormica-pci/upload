@@ -168,7 +168,7 @@
     // ─────────────────────────────────────────────────────────────────
 
     var MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1 GB
-    var CHUNK_SIZE    = 40 * 1024 * 1024;   // 40 MB per git blob
+    var CHUNK_SIZE    = 5 * 1024 * 1024;    // 5 MB per git blob (GitHub API body limit)
     var GH_API        = 'https://api.github.com';
 
     // ── Resolve study_id from signed upload code ──
@@ -209,13 +209,19 @@
       initUploader();
     }
 
-    function ghFetch(url, opts) {
+    function ghFetch(url, opts, retries) {
+      if (retries === undefined) retries = 3;
       opts = opts || {};
       opts.headers = opts.headers || {};
       opts.headers['Authorization'] = 'token ' + GH_PAT;
       if (!opts.headers['Accept']) opts.headers['Accept'] = 'application/vnd.github.v3+json';
       return fetch(url, opts).then(function(resp) {
         if (!resp.ok) return resp.text().then(function(t) {
+          // Retry on 5xx or 429 (rate limit)
+          if (retries > 0 && (resp.status >= 500 || resp.status === 429)) {
+            var wait = resp.status === 429 ? 10000 : 2000;
+            return sleep(wait).then(function() { return ghFetch(url, opts, retries - 1); });
+          }
           throw new Error('GitHub API ' + resp.status + ': ' + t.substring(0, 200));
         });
         if (resp.status === 204) return null;
@@ -366,38 +372,50 @@
           var bytesUploaded = 0;
           var uploadStartTime = Date.now();
 
+          var CONCURRENT = 3; // parallel blob uploads
+
           for (var fileIdx = 0; fileIdx < total; fileIdx++) {
             var file = selectedFiles[fileIdx];
             var numChunks = Math.ceil(file.size / CHUNK_SIZE) || 1;
-            var blobShas = [];
+            var blobShas = new Array(numChunks);
 
             progLabel.textContent = 'Staging ' + file.name + '  (' + (fileIdx + 1) + ' of ' + total + ')';
 
-            for (var chunkIdx = 0; chunkIdx < numChunks; chunkIdx++) {
-              var start = chunkIdx * CHUNK_SIZE;
-              var end = Math.min(start + CHUNK_SIZE, file.size);
+            // Upload chunks in parallel batches
+            for (var batchStart = 0; batchStart < numChunks; batchStart += CONCURRENT) {
+              var batchEnd = Math.min(batchStart + CONCURRENT, numChunks);
+              var batchPromises = [];
 
-              // Read chunk
-              var buf = await readSlice(file, start, end);
-              var b64 = arrayBufferToBase64(buf);
+              for (var ci = batchStart; ci < batchEnd; ci++) {
+                (function(chunkIdx) {
+                  var start = chunkIdx * CHUNK_SIZE;
+                  var end = Math.min(start + CHUNK_SIZE, file.size);
+                  var chunkSize = end - start;
 
-              // Upload as git blob
-              var blobResp = await ghFetch(GH_API + '/repos/' + GH_OWNER + '/' + GH_REPO + '/git/blobs', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content: b64, encoding: 'base64' })
-              });
-              blobShas.push(blobResp.sha);
+                  var p = readSlice(file, start, end).then(function(buf) {
+                    var b64 = arrayBufferToBase64(buf);
+                    return ghFetch(GH_API + '/repos/' + GH_OWNER + '/' + GH_REPO + '/git/blobs', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ content: b64, encoding: 'base64' })
+                    }).then(function(blobResp) {
+                      blobShas[chunkIdx] = blobResp.sha;
+                      bytesUploaded += chunkSize;
 
-              bytesUploaded += (end - start);
-              var pct = Math.round((bytesUploaded / totalBytes) * 90); // 90% for staging
-              progBar.style.width = pct + '%';
-              progInfo.textContent = formatSize(bytesUploaded) + ' / ' + formatSize(totalBytes);
+                      var pct = Math.round((bytesUploaded / totalBytes) * 90);
+                      progBar.style.width = pct + '%';
+                      progInfo.textContent = formatSize(bytesUploaded) + ' / ' + formatSize(totalBytes);
 
-              var elapsed = Date.now() - uploadStartTime;
-              var rate = bytesUploaded / elapsed; // bytes/ms
-              var remaining = (totalBytes - bytesUploaded) / rate;
-              progTime.textContent = 'Est. ' + formatDuration(remaining) + ' remaining';
+                      var elapsed = Date.now() - uploadStartTime;
+                      var rate = bytesUploaded / elapsed;
+                      var remaining = (totalBytes - bytesUploaded) / rate;
+                      progTime.textContent = 'Est. ' + formatDuration(remaining) + ' remaining';
+                    });
+                  });
+                  batchPromises.push(p);
+                })(ci);
+              }
+              await Promise.all(batchPromises);
             }
 
             manifest.push({ name: file.name, blob_shas: blobShas });
