@@ -411,13 +411,17 @@
         var totalBytes = 0;
         for (var i = 0; i < total; i++) totalBytes += selectedFiles[i].size;
 
-        uploadNext(0, total, totalBytes, 0, 0, []);
+        var fileNames = selectedFiles.map(function(f) { return f.name; });
+        uploadNext(0, total, totalBytes, 0, 0, [], fileNames);
       });
 
-      function uploadNext(idx, total, totalBytes, bytesUploaded, succeeded, failures) {
+      function uploadNext(idx, total, totalBytes, bytesUploaded, succeeded, failures, fileNames) {
         if (idx >= total) {
           progSect.classList.remove('active');
           progBar.classList.remove('estimating');
+
+          // Send Slack notification via GitHub Action
+          notifySlack(succeeded, failures, totalBytes, fileNames);
 
           if (failures.length === 0) {
             showStatus('All ' + succeeded + ' file(s) uploaded successfully to folder "' + studyId +
@@ -475,7 +479,7 @@
           clearInterval(estimateTimer);
           markFileStatus(idx, false);
           failures.push({ name: file.name, error: 'Timed out' });
-          uploadNext(idx + 1, total, totalBytes, bytesUploaded + file.size, succeeded, failures);
+          uploadNext(idx + 1, total, totalBytes, bytesUploaded + file.size, succeeded, failures, fileNames);
         }, timeoutMs);
 
         function onLoad() {
@@ -493,11 +497,38 @@
           progBar.classList.remove('estimating');
           progBar.style.width = '100%';
           markFileStatus(idx, true);
-          uploadNext(idx + 1, total, totalBytes, bytesUploaded + file.size, succeeded + 1, failures);
+          uploadNext(idx + 1, total, totalBytes, bytesUploaded + file.size, succeeded + 1, failures, fileNames);
         }
 
         iframe.addEventListener('load', onLoad);
         document.getElementById('iframeForm').submit();
+      }
+
+      // ── Slack notification via GitHub Action ──
+      function notifySlack(succeeded, failures, totalBytes, fileNames) {
+        var status = failures.length === 0 ? 'success' : 'failure';
+        var failedNames = failures.map(function(f) { return f.name; });
+        var errorDetails = failures.map(function(f) { return f.name + ': ' + (f.error || 'unknown'); }).join('; ');
+
+        var inputs = {
+          study_id: studyId,
+          status: status,
+          succeeded: String(succeeded),
+          failed: String(failures.length),
+          total_size: formatSize(totalBytes),
+          file_names: status === 'success' ? fileNames.join(',') : failedNames.join(','),
+          error_details: status === 'failure' ? errorDetails.substring(0, 500) : ''
+        };
+
+        ghFetchGlobal(GH_API + '/repos/' + GH_OWNER + '/' + GH_REPO +
+          '/actions/workflows/upload-notification.yml/dispatches', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ref: 'main', inputs: inputs })
+        }).catch(function(err) {
+          // Don't show notification errors to the user — upload itself succeeded/failed
+          console.log('Slack notification trigger failed:', err);
+        });
       }
 
       // ── UI helpers ──
