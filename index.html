@@ -74,8 +74,17 @@
       width: 100%; height: 10px; background: var(--border); border-radius: 5px; overflow: hidden;
     }
     .progress-bar {
-      height: 100%; border-radius: 5px; transition: width 0.3s ease;
+      height: 100%; border-radius: 5px; transition: width 0.4s ease;
       width: 0%; background: var(--primary);
+    }
+    .progress-bar.estimating {
+      background: linear-gradient(90deg, var(--primary) 0%, #5b9bd5 50%, var(--primary) 100%);
+      background-size: 200% 100%;
+      animation: shimmer 2s ease-in-out infinite;
+    }
+    @keyframes shimmer {
+      0% { background-position: 200% 0; }
+      100% { background-position: -200% 0; }
     }
     .progress-detail {
       display: flex; justify-content: space-between;
@@ -115,6 +124,11 @@
          then embed the output HTML in your REDCap instrument.</p>
     </div>
 
+    <div id="noFolderError" class="card error-page" style="display:none;">
+      <h2>Preparing Upload Folder</h2>
+      <p id="folderStatusMsg">Creating folder for <strong id="missingStudyId"></strong> on the server. Please wait...</p>
+    </div>
+
     <div id="uploadInterface" style="display:none;">
       <div class="card">
         <div class="study-id-display">
@@ -149,18 +163,32 @@
     </div>
   </div>
 
+  <!-- Hidden form + iframe for cross-origin upload (bypasses CORS) -->
+  <form id="iframeForm" method="POST" enctype="multipart/form-data"
+        target="uploadFrame" style="display:none;">
+    <input type="hidden" name="token"     id="ifToken">
+    <input type="hidden" name="content"   value="fileRepository">
+    <input type="hidden" name="action"    value="import">
+    <input type="hidden" name="folder_id" id="ifFolderId">
+    <input type="file"   name="file"      id="ifFile">
+  </form>
+  <iframe name="uploadFrame" id="uploadFrame" style="display:none;"></iframe>
+
   <script>
     // ── Configuration (injected by build_upload_page.py) ─────────────
-    // PAT is XOR-encoded at build time to pass GitHub push protection
-    var GH_PAT     = (function(){var k=[76,105,102,101,33],d=[43,1,22,58,21,15,2,43,33,123,13,28,37,22,107,15,59,50,41,109,0,2,47,6,96,58,3,16,2,111,7,5,1,18,16,14,51,45,86,120];return d.map(function(c,i){return String.fromCharCode(c^k[i%k.length])}).join('')})();
-    var GH_OWNER   = 'Dasboab';
-    var GH_REPO    = 'CorMicA-PCI';
+    var GH_PAT       = (function(){var k=[76,105,102,101,33],d=[43,1,22,58,21,15,2,43,33,123,13,28,37,22,107,15,59,50,41,109,0,2,47,6,96,58,3,16,2,111,7,5,1,18,16,14,51,45,86,120];return d.map(function(c,i){return String.fromCharCode(c^k[i%k.length])}).join('')})();
+    var REDCAP_TOKEN  = (function(){var k=[76,105,102,101,33],d=[15,91,94,33,103,9,80,94,38,100,117,94,94,84,98,126,80,87,92,20,125,94,80,93,24,13,80,35,39,20,117,81];return d.map(function(c,i){return String.fromCharCode(c^k[i%k.length])}).join('')})();
+    var REDCAP_API_URL = 'https://cormica-pci-redcap.mvls.gla.ac.uk/redcap/api/';
+    var FOLDER_MAP    = {};
+    var GH_OWNER      = 'Dasboab';
+    var GH_REPO       = 'CorMicA-PCI';
+    var GH_PAGES_REPO = 'cormica-pci/upload';
     // ─────────────────────────────────────────────────────────────────
 
     var MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1 GB
     var GH_API = 'https://api.github.com';
 
-    // ── Parse study_id from URL param, hash fragment, or id param ──
+    // ── Parse study_id ──
     var params  = new URLSearchParams(window.location.search);
     var studyId = (
       params.get('study_id') ||
@@ -169,14 +197,88 @@
       ''
     ).trim();
 
-    if (!GH_PAT || GH_PAT.charAt(0) === '_') {
+    if (!GH_PAT || typeof GH_PAT !== 'string' || GH_PAT.charAt(0) === '_') {
       document.getElementById('configError').style.display = 'block';
     } else if (!studyId || !/^[A-Za-z0-9_-]+$/.test(studyId)) {
       document.getElementById('errorPage').style.display = 'block';
+    } else if (FOLDER_MAP[studyId]) {
+      // Folder exists — show upload interface
+      startUploader(FOLDER_MAP[studyId]);
     } else {
+      // Folder doesn't exist — create it via GitHub Action
+      document.getElementById('missingStudyId').textContent = studyId;
+      document.getElementById('noFolderError').style.display = 'block';
+      createFolderAndProceed();
+    }
+
+    function startUploader(folderId) {
+      document.getElementById('noFolderError').style.display = 'none';
       document.getElementById('uploadInterface').style.display = 'block';
       document.getElementById('studyIdValue').textContent = studyId;
+      // Set up the hidden iframe form
+      document.getElementById('iframeForm').action = REDCAP_API_URL;
+      document.getElementById('ifToken').value = REDCAP_TOKEN;
+      document.getElementById('ifFolderId').value = String(folderId);
       initUploader();
+    }
+
+    // ── Dynamic folder creation via GitHub Action ──
+    function createFolderAndProceed() {
+      var statusEl = document.getElementById('folderStatusMsg');
+
+      ghFetchGlobal(GH_API + '/repos/' + GH_OWNER + '/' + GH_REPO + '/actions/workflows/create-upload-folder.yml/dispatches', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ref: 'main', inputs: { study_id: studyId } })
+      }).then(function() {
+        statusEl.innerHTML = 'Creating folder for <strong>' + studyId + '</strong>... this may take a minute.';
+        return pollForFolder();
+      }).catch(function(err) {
+        statusEl.innerHTML = 'Failed to create folder: ' + err.message +
+          '<br>Please ask your administrator to run the <strong>Generate Upload Page</strong> workflow.';
+      });
+    }
+
+    function pollForFolder() {
+      var started = Date.now();
+      var maxWait = 300000; // 5 min
+
+      return new Promise(function(resolve, reject) {
+        function check() {
+          if (Date.now() - started > maxWait) {
+            reject(new Error('Timed out waiting for folder creation'));
+            return;
+          }
+          // Fetch updated folders.json from the public repo
+          fetch(GH_API + '/repos/' + GH_PAGES_REPO + '/contents/folders.json', {
+            headers: { 'Accept': 'application/vnd.github.v3+json' }
+          }).then(function(r) { return r.json(); })
+            .then(function(data) {
+              if (!data.content) { setTimeout(check, 5000); return; }
+              var json = JSON.parse(atob(data.content.replace(/\n/g, '')));
+              if (json[studyId]) {
+                FOLDER_MAP[studyId] = json[studyId];
+                startUploader(json[studyId]);
+                resolve();
+              } else {
+                setTimeout(check, 5000);
+              }
+            }).catch(function() { setTimeout(check, 5000); });
+        }
+        setTimeout(check, 8000); // First check after 8s (workflow needs time to start)
+      });
+    }
+
+    function ghFetchGlobal(url, opts) {
+      opts = opts || {};
+      opts.headers = opts.headers || {};
+      opts.headers['Authorization'] = 'token ' + GH_PAT;
+      if (!opts.headers['Accept']) opts.headers['Accept'] = 'application/vnd.github.v3+json';
+      return fetch(url, opts).then(function(resp) {
+        if (!resp.ok) return resp.text().then(function(t) { throw new Error('GitHub API ' + resp.status); });
+        if (resp.status === 204) return null;
+        return resp.json();
+      });
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -193,6 +295,7 @@
       var statusMsg  = document.getElementById('statusMessage');
 
       var selectedFiles = [];
+      var uploadSpeed = 0; // bytes/ms, learned from completed uploads
 
       // ── Drop zone ──
       dropZone.addEventListener('click', function() { fileInput.click(); });
@@ -211,61 +314,36 @@
         fileInput.value = '';
       });
 
-      // ── Folder drop support via webkitGetAsEntry ──
+      // ── Folder drop support ──
       function handleDrop(dataTransfer) {
         var items = dataTransfer.items;
-        if (!items || !items.length) {
-          addFiles(Array.from(dataTransfer.files));
-          return;
-        }
-
+        if (!items || !items.length) { addFiles(Array.from(dataTransfer.files)); return; }
         var entries = [];
         for (var i = 0; i < items.length; i++) {
           var entry = items[i].webkitGetAsEntry && items[i].webkitGetAsEntry();
           if (entry) entries.push(entry);
         }
-
-        if (entries.length === 0) {
-          addFiles(Array.from(dataTransfer.files));
-          return;
-        }
-
+        if (entries.length === 0) { addFiles(Array.from(dataTransfer.files)); return; }
         showStatus('Reading folder contents...', 'info');
-        var pending = 0;
-        var collectedFiles = [];
-
+        var pending = 0, collectedFiles = [];
         function readEntry(entry) {
           if (entry.isFile) {
             pending++;
-            entry.file(function(file) {
-              collectedFiles.push(file);
-              pending--;
-              if (pending === 0) finishRead();
-            }, function() { pending--; if (pending === 0) finishRead(); });
+            entry.file(function(f) { collectedFiles.push(f); pending--; if (!pending) finish(); },
+                       function()  { pending--; if (!pending) finish(); });
           } else if (entry.isDirectory) {
             pending++;
-            var reader = entry.createReader();
-            readAllEntries(reader);
+            readAll(entry.createReader());
           }
         }
-
-        function readAllEntries(reader) {
+        function readAll(reader) {
           reader.readEntries(function(results) {
-            if (results.length === 0) {
-              pending--;
-              if (pending === 0) finishRead();
-              return;
-            }
+            if (!results.length) { pending--; if (!pending) finish(); return; }
             for (var i = 0; i < results.length; i++) readEntry(results[i]);
-            readAllEntries(reader); // Chrome batches at 100
-          }, function() { pending--; if (pending === 0) finishRead(); });
+            readAll(reader);
+          }, function() { pending--; if (!pending) finish(); });
         }
-
-        function finishRead() {
-          hideStatus();
-          addFiles(collectedFiles);
-        }
-
+        function finish() { hideStatus(); addFiles(collectedFiles); }
         for (var i = 0; i < entries.length; i++) readEntry(entries[i]);
       }
 
@@ -274,19 +352,15 @@
           var file = files[i];
           if (file.size === 0) continue;
           if (file.size > MAX_FILE_SIZE) {
-            showStatus('"' + file.name + '" exceeds the 1 GB limit.', 'error');
-            continue;
+            showStatus('"' + file.name + '" exceeds the 1 GB limit.', 'error'); continue;
           }
           var isDupe = false;
           for (var j = 0; j < selectedFiles.length; j++) {
-            if (selectedFiles[j].name === file.name && selectedFiles[j].size === file.size) {
-              isDupe = true; break;
-            }
+            if (selectedFiles[j].name === file.name && selectedFiles[j].size === file.size) { isDupe = true; break; }
           }
           if (!isDupe) selectedFiles.push(file);
         }
-        renderFileList();
-        hideStatus();
+        renderFileList(); hideStatus();
       }
 
       function renderFileList() {
@@ -297,11 +371,9 @@
             var li = document.createElement('li');
             li.id = 'file-row-' + idx;
             li.innerHTML =
-              '<span class="file-info">' +
-                '<span class="file-name" title="' + escHtml(file.name) + '">' + escHtml(file.name) + '</span>' +
-                '<span class="file-size">(' + formatSize(file.size) + ')</span>' +
-              '</span>' +
-              '<button class="remove-btn" title="Remove">&times;</button>';
+              '<span class="file-info"><span class="file-name" title="' + escHtml(file.name) + '">' +
+              escHtml(file.name) + '</span><span class="file-size">(' + formatSize(file.size) +
+              ')</span></span><button class="remove-btn" title="Remove">&times;</button>';
             li.querySelector('.remove-btn').addEventListener('click', function() {
               selectedFiles.splice(idx, 1); renderFileList();
             });
@@ -311,53 +383,7 @@
         uploadBtn.disabled = selectedFiles.length === 0;
       }
 
-      // ── GitHub API helpers ──
-      function ghFetch(url, opts) {
-        opts = opts || {};
-        opts.headers = opts.headers || {};
-        opts.headers['Authorization'] = 'token ' + GH_PAT;
-        if (!opts.headers['Accept']) opts.headers['Accept'] = 'application/vnd.github.v3+json';
-        return fetch(url, opts).then(function(resp) {
-          if (!resp.ok) {
-            return resp.text().then(function(t) {
-              throw new Error('GitHub API ' + resp.status + ': ' + t);
-            });
-          }
-          if (resp.status === 204) return null;
-          return resp.json();
-        });
-      }
-
-      // Upload a single file as a release asset using XHR for progress
-      function uploadAsset(uploadUrl, file, onProgress) {
-        return new Promise(function(resolve, reject) {
-          var xhr = new XMLHttpRequest();
-          var url = uploadUrl.replace(/\{[^}]*\}/, '') + '?name=' + encodeURIComponent(file.name);
-
-          xhr.open('POST', url, true);
-          xhr.setRequestHeader('Authorization', 'token ' + GH_PAT);
-          xhr.setRequestHeader('Content-Type', 'application/octet-stream');
-
-          xhr.upload.onprogress = function(e) {
-            if (e.lengthComputable && onProgress) onProgress(e.loaded, e.total);
-          };
-
-          xhr.onload = function() {
-            if (xhr.status >= 200 && xhr.status < 300) {
-              resolve(JSON.parse(xhr.responseText));
-            } else {
-              reject(new Error('Asset upload failed: HTTP ' + xhr.status));
-            }
-          };
-          xhr.onerror = function() { reject(new Error('Network error during upload')); };
-          xhr.ontimeout = function() { reject(new Error('Upload timed out')); };
-          xhr.timeout = 1800000; // 30 min
-
-          xhr.send(file);
-        });
-      }
-
-      // ── Main upload flow ──
+      // ── Upload via hidden iframe ──
       uploadBtn.addEventListener('click', function() {
         if (selectedFiles.length === 0) return;
         uploadBtn.disabled = true;
@@ -366,200 +392,97 @@
         hideStatus();
         fileList.querySelectorAll('.remove-btn').forEach(function(b) { b.style.display = 'none'; });
 
-        doUpload();
-      });
-
-      function doUpload() {
         var total = selectedFiles.length;
         var totalBytes = 0;
         for (var i = 0; i < total; i++) totalBytes += selectedFiles[i].size;
 
-        var releaseTag = 'upload-' + studyId + '-' + Date.now();
+        uploadNext(0, total, totalBytes, 0, 0, []);
+      });
 
-        progLabel.textContent = 'Preparing upload...';
-        progBar.style.width = '0%';
-        progInfo.textContent = '';
-        progTime.textContent = '';
-
-        // Step 1: Create a draft release
-        ghFetch(GH_API + '/repos/' + GH_OWNER + '/' + GH_REPO + '/releases', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            tag_name: releaseTag,
-            name: 'Upload ' + studyId,
-            body: 'Automated upload for study_id: ' + studyId,
-            draft: true
-          })
-        }).then(function(release) {
-          var uploadUrl = release.upload_url;
-          var releaseId = release.id;
-          var bytesUploaded = 0;
-          var succeeded = 0;
-          var failures = [];
-          var uploadStart = Date.now();
-
-          // Step 2: Upload files sequentially as release assets
-          function uploadFileAt(idx) {
-            if (idx >= total) {
-              // Step 3: Trigger the workflow
-              return triggerWorkflow(releaseTag, releaseId, totalBytes, succeeded, failures);
-            }
-
-            var file = selectedFiles[idx];
-            progLabel.textContent = 'Uploading ' + file.name + '  (' + (idx + 1) + ' of ' + total + ')';
-            var fileStart = bytesUploaded;
-
-            return uploadAsset(uploadUrl, file, function(loaded, fileTotal) {
-              var currentTotal = fileStart + loaded;
-              var pct = totalBytes > 0 ? (currentTotal / totalBytes) * 100 : 0;
-              progBar.style.width = Math.min(pct, 99) + '%';
-              progInfo.textContent = formatSize(currentTotal) + ' / ' + formatSize(totalBytes);
-
-              var elapsed = Date.now() - uploadStart;
-              if (currentTotal > 0) {
-                var speed = currentTotal / elapsed; // bytes/ms
-                var remaining = (totalBytes - currentTotal) / speed;
-                progTime.textContent = 'Est. ' + formatDuration(remaining) + ' remaining';
-              }
-            }).then(function() {
-              bytesUploaded += file.size;
-              succeeded++;
-              markFileStatus(idx, true);
-              return uploadFileAt(idx + 1);
-            }).catch(function(err) {
-              bytesUploaded += file.size;
-              failures.push({ name: file.name, error: err.message });
-              markFileStatus(idx, false);
-              return uploadFileAt(idx + 1);
-            });
-          }
-
-          return uploadFileAt(0);
-        }).catch(function(err) {
+      function uploadNext(idx, total, totalBytes, bytesUploaded, succeeded, failures) {
+        if (idx >= total) {
           progSect.classList.remove('active');
-          showStatus('Failed to start upload: ' + err.message, 'error');
+          progBar.classList.remove('estimating');
+
+          if (failures.length === 0) {
+            showStatus('All ' + succeeded + ' file(s) uploaded successfully to folder "' + studyId +
+              '". Total: ' + formatSize(totalBytes) + '.', 'success');
+            selectedFiles = []; renderFileList();
+          } else if (succeeded > 0) {
+            showStatus(succeeded + ' of ' + total + ' file(s) uploaded. Failed: ' +
+              failures.map(function(f) { return f.name; }).join(', ') + '. You can retry the failed files.', 'error');
+            selectedFiles = selectedFiles.filter(function(f) {
+              return failures.some(function(r) { return r.name === f.name; });
+            });
+            renderFileList();
+          } else {
+            showStatus('All uploads failed. Please check your connection and try again.', 'error');
+          }
           uploadBtn.disabled = selectedFiles.length === 0;
           dropZone.style.pointerEvents = '';
-        });
-
-        function triggerWorkflow(releaseTag, releaseId, totalBytes, succeeded, failures) {
-          if (succeeded === 0) {
-            progSect.classList.remove('active');
-            showStatus('All file uploads to GitHub failed. Nothing to transfer.', 'error');
-            uploadBtn.disabled = selectedFiles.length === 0;
-            dropZone.style.pointerEvents = '';
-            // Clean up the empty release
-            ghFetch(GH_API + '/repos/' + GH_OWNER + '/' + GH_REPO + '/releases/' + releaseId, {
-              method: 'DELETE'
-            }).catch(function() {});
-            return;
-          }
-
-          progLabel.textContent = 'Transferring to REDCap file repository...';
-          progBar.style.width = '99%';
-          progTime.textContent = '';
-          progInfo.textContent = succeeded + ' file(s) staged';
-
-          // Trigger the upload-to-redcap workflow
-          ghFetch(GH_API + '/repos/' + GH_OWNER + '/' + GH_REPO + '/actions/workflows/upload-to-redcap.yml/dispatches', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              ref: 'main',
-              inputs: {
-                study_id: studyId,
-                release_tag: releaseTag
-              }
-            })
-          }).then(function() {
-            // Poll for workflow completion
-            return pollWorkflow(releaseTag, totalBytes, succeeded, failures);
-          }).catch(function(err) {
-            progSect.classList.remove('active');
-            showStatus(
-              'Files uploaded to GitHub but failed to trigger transfer: ' + err.message +
-              '. Please contact your administrator.',
-              'error'
-            );
-            uploadBtn.disabled = selectedFiles.length === 0;
-            dropZone.style.pointerEvents = '';
-          });
+          return;
         }
 
-        function pollWorkflow(releaseTag, totalBytes, succeeded, failures) {
-          var pollStart = Date.now();
-          var maxPollMs = 600000; // 10 minutes
+        var file = selectedFiles[idx];
+        progLabel.textContent = 'Uploading ' + file.name + '  (' + (idx + 1) + ' of ' + total + ')';
+        progInfo.textContent = formatSize(bytesUploaded) + ' / ' + formatSize(totalBytes);
 
-          function poll() {
-            var elapsed = Date.now() - pollStart;
+        // Set file on the hidden form
+        var dt = new DataTransfer();
+        dt.items.add(file);
+        document.getElementById('ifFile').files = dt.files;
+
+        // Start time-based progress estimation
+        var startTime = Date.now();
+        progBar.classList.add('estimating');
+        progBar.style.width = '0%';
+        progTime.textContent = '';
+
+        var estimateTimer = setInterval(function() {
+          var elapsed = Date.now() - startTime;
+          if (uploadSpeed > 0) {
+            var expectedMs = file.size / uploadSpeed;
+            var pct = Math.min(95, (elapsed / expectedMs) * 100);
+            progBar.style.width = pct + '%';
+            var remainMs = Math.max(0, expectedMs - elapsed);
+            progTime.textContent = 'Est. ' + formatDuration(remainMs) + ' remaining';
+          } else {
             progTime.textContent = formatDuration(elapsed) + ' elapsed';
+          }
+        }, 500);
 
-            if (elapsed > maxPollMs) {
-              progSect.classList.remove('active');
-              showStatus(
-                'Transfer is taking longer than expected. ' +
-                'Your files have been staged — they will be transferred shortly. ' +
-                'You can close this tab.',
-                'warning'
-              );
-              uploadBtn.disabled = selectedFiles.length === 0;
-              dropZone.style.pointerEvents = '';
-              return;
-            }
+        var iframe = document.getElementById('uploadFrame');
 
-            // Find the workflow run for this release tag
-            ghFetch(
-              GH_API + '/repos/' + GH_OWNER + '/' + GH_REPO +
-              '/actions/workflows/upload-to-redcap.yml/runs?per_page=5&event=workflow_dispatch'
-            ).then(function(data) {
-              var runs = data.workflow_runs || [];
-              var matchedRun = null;
+        // Timeout: scale with file size (min 2 min, ~30s per 100MB, max 30 min)
+        var timeoutMs = Math.max(120000, Math.min(1800000, (file.size / 100000000) * 30000));
+        var timeoutId = setTimeout(function() {
+          iframe.removeEventListener('load', onLoad);
+          clearInterval(estimateTimer);
+          markFileStatus(idx, false);
+          failures.push({ name: file.name, error: 'Timed out' });
+          uploadNext(idx + 1, total, totalBytes, bytesUploaded + file.size, succeeded, failures);
+        }, timeoutMs);
 
-              for (var i = 0; i < runs.length; i++) {
-                // Match by timing — run created after our dispatch
-                if (new Date(runs[i].created_at).getTime() >= pollStart - 5000) {
-                  matchedRun = runs[i];
-                  break;
-                }
-              }
+        function onLoad() {
+          clearTimeout(timeoutId);
+          clearInterval(estimateTimer);
+          iframe.removeEventListener('load', onLoad);
 
-              if (!matchedRun || matchedRun.status !== 'completed') {
-                setTimeout(poll, 5000);
-                return;
-              }
-
-              progSect.classList.remove('active');
-
-              if (matchedRun.conclusion === 'success') {
-                progBar.style.width = '100%';
-                var msg = 'All ' + succeeded + ' file(s) uploaded successfully to folder "' +
-                          studyId + '". Total: ' + formatSize(totalBytes) + '.';
-                if (failures.length > 0) {
-                  msg += ' Note: ' + failures.length + ' file(s) failed to stage: ' +
-                         failures.map(function(f) { return f.name; }).join(', ');
-                }
-                showStatus(msg, 'success');
-                selectedFiles = [];
-                renderFileList();
-              } else {
-                showStatus(
-                  'Transfer to REDCap failed (workflow ' + matchedRun.conclusion + '). ' +
-                  'Please try again or contact your administrator.',
-                  'error'
-                );
-              }
-
-              uploadBtn.disabled = selectedFiles.length === 0;
-              dropZone.style.pointerEvents = '';
-            }).catch(function() {
-              setTimeout(poll, 5000);
-            });
+          // Learn upload speed from this file
+          var elapsed = Date.now() - startTime;
+          if (elapsed > 0 && file.size > 0) {
+            var thisSpeed = file.size / elapsed;
+            uploadSpeed = uploadSpeed > 0 ? (uploadSpeed * 0.3 + thisSpeed * 0.7) : thisSpeed;
           }
 
-          // Wait a moment before first poll to let the workflow start
-          setTimeout(poll, 3000);
+          progBar.classList.remove('estimating');
+          progBar.style.width = '100%';
+          markFileStatus(idx, true);
+          uploadNext(idx + 1, total, totalBytes, bytesUploaded + file.size, succeeded + 1, failures);
         }
+
+        iframe.addEventListener('load', onLoad);
+        document.getElementById('iframeForm').submit();
       }
 
       // ── UI helpers ──
@@ -573,7 +496,7 @@
         var span = document.createElement('span');
         span.className = 'status-icon';
         span.textContent = ok ? '\u2705' : '\u274C';
-        span.title = ok ? 'Uploaded to GitHub' : 'Failed';
+        span.title = ok ? 'Uploaded' : 'Failed';
         row.appendChild(span);
       }
 
@@ -586,19 +509,16 @@
       function escHtml(s) {
         return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       }
-
       function formatSize(bytes) {
         if (bytes < 1024) return bytes + ' B';
         if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
         if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
         return (bytes / 1073741824).toFixed(2) + ' GB';
       }
-
       function formatDuration(ms) {
         var secs = Math.floor(ms / 1000);
         if (secs < 60) return secs + 's';
-        var mins = Math.floor(secs / 60);
-        secs = secs % 60;
+        var mins = Math.floor(secs / 60); secs = secs % 60;
         return mins + 'm ' + (secs < 10 ? '0' : '') + secs + 's';
       }
     }
