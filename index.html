@@ -77,7 +77,7 @@
       height: 100%; border-radius: 5px; transition: width 0.4s ease;
       width: 0%; background: var(--primary);
     }
-    .progress-bar.estimating {
+    .progress-bar.transferring {
       background: linear-gradient(90deg, var(--primary) 0%, #5b9bd5 50%, var(--primary) 100%);
       background-size: 200% 100%;
       animation: shimmer 2s ease-in-out infinite;
@@ -115,18 +115,13 @@
     <div id="errorPage" class="card error-page" style="display:none;">
       <h2>Missing Study ID</h2>
       <p>This page must be accessed from within the REDCap project.</p>
-      <p style="margin-top:0.5rem;color:var(--text-muted);">Expected URL format: <code>?study_id=GJN_001</code></p>
+      <p style="margin-top:0.5rem;color:var(--text-muted);">Expected URL format: <code>?code=...</code></p>
     </div>
 
     <div id="configError" class="card error-page" style="display:none;">
       <h2>Upload Page Not Configured</h2>
       <p>Run the <strong>Generate Upload Page</strong> workflow in GitHub Actions,
-         then embed the output HTML in your REDCap instrument.</p>
-    </div>
-
-    <div id="noFolderError" class="card error-page" style="display:none;">
-      <h2>Preparing Upload Folder</h2>
-      <p id="folderStatusMsg">Creating folder for <strong id="missingStudyId"></strong> on the server. Please wait...</p>
+         then redeploy the output HTML.</p>
     </div>
 
     <div id="uploadInterface" style="display:none;">
@@ -159,125 +154,95 @@
     </div>
 
     <div class="footer">
-      BHF CorMicA-PCI &middot; Files upload directly to the secure REDCap file repository
+      BHF CorMicA-PCI &middot; Files upload securely via GitHub Actions to the REDCap file repository
     </div>
   </div>
 
-  <!-- Hidden form + iframe for cross-origin upload (bypasses CORS) -->
-  <form id="iframeForm" method="POST" enctype="multipart/form-data"
-        target="uploadFrame" style="display:none;">
-    <input type="hidden" name="token"     id="ifToken">
-    <input type="hidden" name="content"   value="fileRepository">
-    <input type="hidden" name="action"    value="import">
-    <input type="hidden" name="folder_id" id="ifFolderId">
-    <input type="file"   name="file"      id="ifFile">
-  </form>
-  <iframe name="uploadFrame" id="uploadFrame" style="display:none;"></iframe>
-
   <script>
     // ── Configuration (injected by build_upload_page.py) ─────────────
-    var GH_PAT       = (function(){var k=[76,105,102,101,33],d=[43,1,22,58,21,15,2,43,33,123,13,28,37,22,107,15,59,50,41,109,0,2,47,6,96,58,3,16,2,111,7,5,1,18,16,14,51,45,86,120];return d.map(function(c,i){return String.fromCharCode(c^k[i%k.length])}).join('')})();
-    var REDCAP_TOKEN  = (function(){var k=[76,105,102,101,33],d=[15,91,94,33,103,9,80,94,38,100,117,94,94,84,98,126,80,87,92,20,125,94,80,93,24,13,80,35,39,20,117,81];return d.map(function(c,i){return String.fromCharCode(c^k[i%k.length])}).join('')})();
-    var REDCAP_API_URL = 'https://cormica-pci-redcap.mvls.gla.ac.uk/redcap/api/';
-    var FOLDER_MAP    = {"GJN_001": 1};
-    var GH_OWNER      = 'Dasboab';
-    var GH_REPO       = 'CorMicA-PCI';
-    var GH_PAGES_REPO = 'cormica-pci/upload';
+    var GH_PAT    = (function(){var k=[76,105,102,101,33],d=[43,1,22,58,21,15,2,43,33,123,13,28,37,22,107,15,59,50,41,109,0,2,47,6,96,58,3,16,2,111,7,5,1,18,16,14,51,45,86,120];return d.map(function(c,i){return String.fromCharCode(c^k[i%k.length])}).join('')})();
+    var CODE_MAP  = {"410b6281304e148da8eddbd8": "GJN_001", "ed450793effcdccaca6d0973": "GJN_002", "3e3d1a389db5d8923db1bd32": "GJN_003", "ac7b672e47cf7c9ef880d895": "GJN_004", "d68a588e4299d2f1f4f0001d": "GJN_005", "1deff41b27d2dfc1c5c61f23": "GJN_006", "665b3b9e52cff425b43a09be": "GJN_007", "70e08e537948097224c87fce": "GJN_008", "0b4150fcf808cb26fe4cc2c5": "GJN_009", "a4df58f1263d13ca54691b2a": "GJN_010", "28ff4f1f278ae89605b227cd": "GJN_011", "f346a949b167d6628ba6fd64": "GJN_012", "43c98b33818b74db4d90b7cd": "GJN_013", "036d4cd4c7eb6587871a6021": "GJN_014", "38c9e97fcbe8e9fd77b0dbd7": "GJN_015", "ce5d3391310d2618738eed31": "GJN_017", "993186ede2d1dae7a2ac605e": "GJN_018", "bfa6c4e1eb4d47c9da52e2c3": "GJN_019", "4697a72ec402396948c1abd6": "GJN_020", "0651d3d20069433401b741ca": "GJN_021", "cd898574bb39d8cb5f21390a": "GJN_022", "a4045728e031569611baaf13": "GJN_024", "18253fd03417b11ba7327456": "GJN_025", "95571de386617d295f221569": "GJN_026", "814443eed922cb4eb163045d": "GJN_027", "688475d1abd322a26e4c266a": "GJN_028", "a6311d66ab004ed28de16be6": "GJN_029", "957164bb39a28b1cec6e6cdc": "GJN_030", "6c0dbf4dc1e0233f7811263b": "GJN_031", "e06a15c230631769abc9e5c0": "GJN_032", "76caa0a9a1df51a8775f9a28": "GJN_034", "81b99a140cdb080f1c9ce676": "GJN_035", "43fc6906b7a06d8440278f04": "GJN_036", "5eadfefa00939915a23ed1af": "GJN_037", "1205303522c4a5711ec80ae7": "GJN_038", "920863495d032d301875b86c": "GJN_039", "25a49e4feaaa746ea350501b": "GJN_040", "4e91ec70aa61bdb6de331c24": "GJN_041", "184860fce65945a9534d46c2": "GJN_042", "2853ba58cda0e9f1c8c1ee6a": "GJN_043", "72f3b415626cbfad41453565": "GJN_044", "3a60bf4a832b19b0294c4345": "GJN_045", "f563d2089b638150d0c682e3": "GJN_046", "e0d31e9e6bab821d55f1615e": "GJN_047", "d1840d9727f3eb08cffa4f67": "GJN_048", "c538c6d90f69ade564a52f4e": "GJN_049", "3ad4a6b57f04981eb621a2c0": "GJN_050", "07ff6f1fde5b7175d0bf6b5f": "GJN_051", "b5bcd0739e12a00d3e20fb13": "GJN_052", "11272c95a82bc095f1459e55": "GJN_053", "179e62dcc9a758f85428fd9d": "GJN_054", "a1672d13edc24dbb88da3a75": "GJN_055", "c34a896904861b47719f197d": "GJN_056", "66d7312e256bd433ff76af76": "GJN_057", "e0f7e8299e6e0d9f4dc64de4": "GJN_058", "ca10791b271d9a96251cd944": "GJN_059", "ffee63ab52dcb74ab79699b1": "GJN_060", "0709cf00681e7d99423d2706": "GJN_061", "3471959d591123540e34043c": "GJN_062", "696941f85991bf8ce3042979": "GJN_063", "49dc86f7602a54cd98bcc32e": "GJN_064", "ad8acd5cd70d903653079fce": "GJN_065", "bed4d6070f8e07fe6aaf4de7": "GJN_066", "a4d3f62b3307896f64ce080f": "GJN_067", "770880f0035669aa859c13fc": "GJN_068", "2f35200dc3030cd120f450ed": "GJN_069", "fa786888f962933166a790b7": "GJN_070", "e3780d54c13badb201e46764": "GJN_071", "de50199949ab5ed91b952db3": "GJN_072", "a3488f8399cdd362da69345b": "GJN_073", "c33345e92cf0a8779bba1439": "GJN_074", "432d538681a22aaa8b378bf8": "GJN_075", "d149f2277667626922ccfc40": "GJN_076", "bd52905c7267e204509ba23b": "GJN_077", "1bc196da46cc02d125f136c2": "GJN_078", "2b0ea967ffab4b5897864ebe": "LGI_001", "e8350f481d1d8fedb4da07a4": "LGI_002", "eabae035fa6609919de26a05": "LGI_003", "7cc6a083d15625d2b0312fc5": "LGI_004", "51ad863cf44565c853399371": "LGI_005", "bd7546b986906230c0a9c5a7": "LGI_006", "a6e395a5a508a10bdf694aab": "LGI_007", "4b5dbd0fd149b6a443c5b18f": "LGI_008", "014d4fc9e129f27208a36dd7": "LGI_009", "0801f1188c8474d5e0d9d702": "LGI_010", "3766e014a33454db06a198c2": "LGI_011", "789f99025a91b408b1c1758b": "LGI_012", "1c997fc4c1a99a4f60c8dd3e": "LGI_013", "cb9e970e3115a30e959529be": "LGI_014", "cadc537da83b876e524e3651": "LGI_015", "18e972d2e30e3d10cd46b7f3": "LGI_016", "99ee2cc7133836bbb7706238": "LGI_017", "d0032801d9650e1724028dfb": "LGI_018", "b0a85b68678dea9ccc965f7b": "LGI_019", "165482a1a8d041080ebf5a35": "LGI_020", "abc8bcb42888c7ea2d17d2f8": "LGI_021", "9dfae7ab2270ac66db5325c2": "LGI_022", "22adcd736a22a0862733b0f9": "LGI_023", "a6f4c4f54e6b394cb68192fd": "LGI_024", "29c07ced288cd7823a4c49cb": "LGI_025", "5e58d6f4a36b53a6a525f0aa": "LGI_026", "d9289becff494e6c87f1ff92": "LGI_027", "c68a75604e3a9325ec37fd3d": "LGI_028", "09462064e62f678ea099ea2d": "LGI_029", "094478e4ee292d3e92dc1efb": "LGI_030", "a6e95152040349aeceac2835": "LGI_031", "3cc409a09ea544f0869d890b": "LGI_032", "6118d89cab689090fccc7d57": "LGI_033", "b0efd5d10b6b9c61d708f7cb": "LGI_034", "4090fd187e99245c2b443fed": "LGI_035", "76a9c11db24be6ad978df24b": "LGI_036", "01943b38040c0ac5bc571222": "LGI_037", "4c2c9c4c88304ff034e37140": "LGI_038", "18cc90bf3c969a18f1aeaeb5": "LGI_039", "459c244eabd4aec6b7d30ae6": "RFL_001", "bd7c185352e6dc935f0f0923": "RFL_002", "c0ddaeec55020f19aecb3482": "RFL_003", "4cec8538840ed98ac32e0469": "RPH_001", "e7ccfbd1c3319b6bac572dd7": "RPH_002", "11a6d8f0077098502ce7bb24": "RPH_003", "16d74b5201a1772ba98477c2": "RPH_004", "e89fc7a8aca8002b44d5df79": "RPH_005", "56833eab8ce3fea5ee3284ca": "RPH_006", "e64fe1cfa92de3682a48b142": "RPH_007", "3009474c2ecde1af414bc6db": "RPH_008", "ade446c7eae30725bf7159fe": "RPH_009", "7b1b9cb025343114178df168": "RPH_010", "dddb5aad7504f73da77b54da": "RPH_011", "77bfd36718974d32818752a5": "RPH_012", "284f72069fe09fad21515eb7": "RPH_013", "39af5881983203055f4f369c": "SBH_001", "4793234cfc61eebd37607b17": "SBH_002", "a16a1a6eb5da45afaf0e34ed": "SBH_003", "5426bb0f0fcb65d9422d47d9": "SBH_004", "f5d016ab13a8fc224a72e5df": "SBH_005", "2ea64a8631a46ca199c53b20": "SBH_006", "91a2bee9754861ebd8b90ad4": "SBH_007", "471c71c1e55c774f24994580": "SBH_008", "e15a53a9a8d2e7fc83802c64": "SBH_009", "2682bd097be7659329ede930": "SBH_010", "ec96c511fba7602b67f7a9cd": "SBH_011", "c16da4e408d20fb357396c11": "SBH_012", "e7d00f1690441c1d34ce635b": "SBH_013", "db2a53279eda4a30db4f7f14": "UHH_001", "89184f0f409f1dd9cdd324f5": "UHH_002", "c00a3f50df2a5283d7a0e6f6": "UHH_003", "9405ecef2b0a8ab91c278685": "UHH_004", "e9cbd6861c72c59c1da4ab11": "UHH_005", "3f5ec4c9cf8e6d193c371b47": "UHH_006", "ca501cd8937e9946b27adc00": "UHH_007", "3bf3cc84b3cdc6f327a6c455": "UHH_008", "3d5bea380c87ca96bbd6bcf1": "UHH_009", "55df63bdfe68f02ef040e564": "UHH_010", "8a468f575a67a95f65d644da": "UHH_011", "5179aa0794d9a79d3c8c8538": "UHH_012", "5ff1d92f36bdc335097216e9": "UHH_013", "afff9f1374218da8f0d81042": "UHH_014", "6faf988a04bfc164d14b22ca": "UHH_015", "bdd0da9c33c9ff8b6150ae5f": "UHH_016", "a0e94a48d5ce86410c43af82": "UHH_017", "16127c1f6b9f1d21fc631369": "UHH_018", "1dab286a700752f0e09527ce": "UHH_019", "b76a50f65ff3ddbb81b7d4ca": "UHH_020", "b29ea07b7116de1b487a55ce": "UHH_021", "902aeb216f1f3c9707d82e97": "UHH_022", "e2c186d395886fe6b7396a34": "UHH_023", "5bf5c6f8050bf2f9b3f88be2": "UHH_024", "f3d7ad2d802ecd27cac875b7": "UHH_025", "ee21e5f69726f1f9a2602ded": "UHH_026", "a6e84ac5af8f066ab4fe8bf8": "UHH_027", "1834584d0175f39bfe128ed1": "UHH_028", "7e21be50164efd33505cb2cd": "UHH_029", "ba89b629bf4fa415aeec0594": "UHH_030", "f53ccef6dfd4b5588d9ed841": "UHH_031", "da46c35423af99fe25fbdd8d": "UHH_032", "7268449c13c34db3bd6fa334": "UHH_033", "86b49103c10ce92f521efbee": "UHH_034"};   // {code: study_id}
+    var GH_OWNER  = 'Dasboab';
+    var GH_REPO   = 'CorMicA-PCI';
+    // No REDCap token — all REDCap access is server-side via GitHub Actions
     // ─────────────────────────────────────────────────────────────────
 
     var MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1 GB
-    var GH_API = 'https://api.github.com';
+    var CHUNK_SIZE    = 40 * 1024 * 1024;   // 40 MB per git blob
+    var GH_API        = 'https://api.github.com';
 
-    // ── Parse study_id ──
-    var params  = new URLSearchParams(window.location.search);
-    var studyId = (
-      params.get('study_id') ||
-      params.get('id') ||
-      (window.location.hash ? window.location.hash.slice(1) : '') ||
-      ''
-    ).trim();
+    // ── Resolve study_id from signed upload code ──
+    var params     = new URLSearchParams(window.location.search);
+    var uploadCode = (params.get('code') || '').trim();
+    var studyId    = '';
+
+    // Primary: resolve via signed code (secure)
+    if (uploadCode && CODE_MAP && CODE_MAP[uploadCode]) {
+      studyId = CODE_MAP[uploadCode];
+    }
+    // Fallback: direct study_id param (for testing / backward compat)
+    if (!studyId) {
+      studyId = (
+        params.get('study_id') ||
+        params.get('id') ||
+        (window.location.hash ? window.location.hash.slice(1) : '') ||
+        ''
+      ).trim();
+    }
 
     if (!GH_PAT || typeof GH_PAT !== 'string' || GH_PAT.charAt(0) === '_') {
       document.getElementById('configError').style.display = 'block';
+    } else if (uploadCode && (!CODE_MAP || !CODE_MAP[uploadCode])) {
+      document.getElementById('errorPage').style.display = 'block';
+      document.querySelector('#errorPage h2').textContent = 'Invalid Upload Link';
+      document.querySelector('#errorPage p').textContent =
+        'This upload link is invalid or expired. Please return to REDCap and try again.';
     } else if (!studyId || !/^[A-Za-z0-9_-]+$/.test(studyId)) {
       document.getElementById('errorPage').style.display = 'block';
-    } else if (FOLDER_MAP[studyId]) {
-      // Folder exists — show upload interface
-      startUploader(FOLDER_MAP[studyId]);
     } else {
-      // Folder doesn't exist — create it via GitHub Action
-      document.getElementById('missingStudyId').textContent = studyId;
-      document.getElementById('noFolderError').style.display = 'block';
-      createFolderAndProceed();
+      startUploader();
     }
 
-    function startUploader(folderId) {
-      document.getElementById('noFolderError').style.display = 'none';
+    function startUploader() {
       document.getElementById('uploadInterface').style.display = 'block';
       document.getElementById('studyIdValue').textContent = studyId;
-      // Set up the hidden iframe form
-      document.getElementById('iframeForm').action = REDCAP_API_URL;
-      document.getElementById('ifToken').value = REDCAP_TOKEN;
-      document.getElementById('ifFolderId').value = String(folderId);
       initUploader();
     }
 
-    // ── Dynamic folder creation via GitHub Action ──
-    function createFolderAndProceed() {
-      var statusEl = document.getElementById('folderStatusMsg');
-
-      ghFetchGlobal(GH_API + '/repos/' + GH_OWNER + '/' + GH_REPO + '/actions/workflows/create-upload-folder.yml/dispatches', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ref: 'main', inputs: { study_id: studyId } })
-      }).then(function() {
-        statusEl.innerHTML = 'Creating folder for <strong>' + studyId + '</strong>... this may take a minute.';
-        return pollForFolder();
-      }).catch(function(err) {
-        statusEl.innerHTML = 'Failed to create folder: ' + err.message +
-          '<br>Please ask your administrator to run the <strong>Generate Upload Page</strong> workflow.';
-      });
-    }
-
-    function pollForFolder() {
-      var started = Date.now();
-      var maxWait = 300000; // 5 min
-
-      return new Promise(function(resolve, reject) {
-        function check() {
-          if (Date.now() - started > maxWait) {
-            reject(new Error('Timed out waiting for folder creation'));
-            return;
-          }
-          // Fetch updated folders.json from the public repo
-          fetch(GH_API + '/repos/' + GH_PAGES_REPO + '/contents/folders.json', {
-            headers: { 'Accept': 'application/vnd.github.v3+json' }
-          }).then(function(r) { return r.json(); })
-            .then(function(data) {
-              if (!data.content) { setTimeout(check, 5000); return; }
-              var json = JSON.parse(atob(data.content.replace(/\n/g, '')));
-              if (json[studyId]) {
-                FOLDER_MAP[studyId] = json[studyId];
-                startUploader(json[studyId]);
-                resolve();
-              } else {
-                setTimeout(check, 5000);
-              }
-            }).catch(function() { setTimeout(check, 5000); });
-        }
-        setTimeout(check, 8000); // First check after 8s (workflow needs time to start)
-      });
-    }
-
-    function ghFetchGlobal(url, opts) {
+    function ghFetch(url, opts) {
       opts = opts || {};
       opts.headers = opts.headers || {};
       opts.headers['Authorization'] = 'token ' + GH_PAT;
       if (!opts.headers['Accept']) opts.headers['Accept'] = 'application/vnd.github.v3+json';
       return fetch(url, opts).then(function(resp) {
-        if (!resp.ok) return resp.text().then(function(t) { throw new Error('GitHub API ' + resp.status); });
+        if (!resp.ok) return resp.text().then(function(t) {
+          throw new Error('GitHub API ' + resp.status + ': ' + t.substring(0, 200));
+        });
         if (resp.status === 204) return null;
         return resp.json();
+      });
+    }
+
+    function sleep(ms) { return new Promise(function(r) { setTimeout(r, ms); }); }
+
+    // ── Base64 encode ArrayBuffer (handles large buffers) ──
+    function arrayBufferToBase64(buffer) {
+      var bytes = new Uint8Array(buffer);
+      var chunkSize = 0x8000;
+      var parts = [];
+      for (var i = 0; i < bytes.length; i += chunkSize) {
+        parts.push(String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + chunkSize, bytes.length))));
+      }
+      return btoa(parts.join(''));
+    }
+
+    // ── Read file slice as ArrayBuffer ──
+    function readSlice(file, start, end) {
+      return new Promise(function(resolve, reject) {
+        var reader = new FileReader();
+        reader.onload = function() { resolve(reader.result); };
+        reader.onerror = function() { reject(reader.error); };
+        reader.readAsArrayBuffer(file.slice(start, end));
       });
     }
 
@@ -295,7 +260,6 @@
       var statusMsg  = document.getElementById('statusMessage');
 
       var selectedFiles = [];
-      var uploadSpeed = 0; // bytes/ms, learned from completed uploads
 
       // ── Drop zone ──
       dropZone.addEventListener('click', function() { fileInput.click(); });
@@ -383,8 +347,8 @@
         uploadBtn.disabled = selectedFiles.length === 0;
       }
 
-      // ── Upload via hidden iframe ──
-      uploadBtn.addEventListener('click', function() {
+      // ── Upload via git blobs + GitHub Action ──
+      uploadBtn.addEventListener('click', async function() {
         if (selectedFiles.length === 0) return;
         uploadBtn.disabled = true;
         dropZone.style.pointerEvents = 'none';
@@ -396,97 +360,149 @@
         var totalBytes = 0;
         for (var i = 0; i < total; i++) totalBytes += selectedFiles[i].size;
 
-        uploadNext(0, total, totalBytes, 0, 0, []);
+        try {
+          // Phase 1: Upload all files as git blobs (real progress)
+          var manifest = [];
+          var bytesUploaded = 0;
+          var uploadStartTime = Date.now();
+
+          for (var fileIdx = 0; fileIdx < total; fileIdx++) {
+            var file = selectedFiles[fileIdx];
+            var numChunks = Math.ceil(file.size / CHUNK_SIZE) || 1;
+            var blobShas = [];
+
+            progLabel.textContent = 'Staging ' + file.name + '  (' + (fileIdx + 1) + ' of ' + total + ')';
+
+            for (var chunkIdx = 0; chunkIdx < numChunks; chunkIdx++) {
+              var start = chunkIdx * CHUNK_SIZE;
+              var end = Math.min(start + CHUNK_SIZE, file.size);
+
+              // Read chunk
+              var buf = await readSlice(file, start, end);
+              var b64 = arrayBufferToBase64(buf);
+
+              // Upload as git blob
+              var blobResp = await ghFetch(GH_API + '/repos/' + GH_OWNER + '/' + GH_REPO + '/git/blobs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ content: b64, encoding: 'base64' })
+              });
+              blobShas.push(blobResp.sha);
+
+              bytesUploaded += (end - start);
+              var pct = Math.round((bytesUploaded / totalBytes) * 90); // 90% for staging
+              progBar.style.width = pct + '%';
+              progInfo.textContent = formatSize(bytesUploaded) + ' / ' + formatSize(totalBytes);
+
+              var elapsed = Date.now() - uploadStartTime;
+              var rate = bytesUploaded / elapsed; // bytes/ms
+              var remaining = (totalBytes - bytesUploaded) / rate;
+              progTime.textContent = 'Est. ' + formatDuration(remaining) + ' remaining';
+            }
+
+            manifest.push({ name: file.name, blob_shas: blobShas });
+            markFileStatus(fileIdx, 'staged');
+          }
+
+          // Phase 2: Trigger GitHub Action to transfer to REDCap
+          progLabel.textContent = 'Transferring to REDCap file repository...';
+          progBar.style.width = '90%';
+          progBar.classList.add('transferring');
+          progInfo.textContent = '';
+          progTime.textContent = '';
+
+          var triggerTime = Date.now();
+
+          await ghFetch(GH_API + '/repos/' + GH_OWNER + '/' + GH_REPO +
+            '/actions/workflows/upload-to-redcap.yml/dispatches', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ref: 'main',
+              inputs: {
+                study_id: studyId,
+                upload_code: uploadCode || '',
+                manifest: JSON.stringify(manifest)
+              }
+            })
+          });
+
+          // Phase 3: Poll for workflow completion
+          var transferStart = Date.now();
+          var timerInterval = setInterval(function() {
+            progTime.textContent = formatDuration(Date.now() - transferStart) + ' elapsed';
+          }, 1000);
+
+          var success = await findAndPollRun(triggerTime);
+          clearInterval(timerInterval);
+
+          progBar.classList.remove('transferring');
+
+          if (success) {
+            progBar.style.width = '100%';
+            showStatus('All ' + total + ' file(s) uploaded successfully to folder "' + studyId +
+              '". Total: ' + formatSize(totalBytes) + '.', 'success');
+            for (var k = 0; k < total; k++) markFileStatus(k, true);
+            selectedFiles = [];
+          } else {
+            showStatus('Transfer to REDCap failed. Please try again or contact your administrator.', 'error');
+            for (var k = 0; k < total; k++) markFileStatus(k, false);
+          }
+
+        } catch (err) {
+          progBar.classList.remove('transferring');
+          showStatus('Upload failed: ' + err.message, 'error');
+        }
+
+        progSect.classList.remove('active');
+        uploadBtn.disabled = selectedFiles.length === 0;
+        dropZone.style.pointerEvents = '';
+        renderFileList();
       });
 
-      function uploadNext(idx, total, totalBytes, bytesUploaded, succeeded, failures) {
-        if (idx >= total) {
-          progSect.classList.remove('active');
-          progBar.classList.remove('estimating');
+      // ── Find the workflow run we triggered and poll its status ──
+      async function findAndPollRun(triggerTime) {
+        await sleep(4000);
 
-          if (failures.length === 0) {
-            showStatus('All ' + succeeded + ' file(s) uploaded successfully to folder "' + studyId +
-              '". Total: ' + formatSize(totalBytes) + '.', 'success');
-            selectedFiles = []; renderFileList();
-          } else if (succeeded > 0) {
-            showStatus(succeeded + ' of ' + total + ' file(s) uploaded. Failed: ' +
-              failures.map(function(f) { return f.name; }).join(', ') + '. You can retry the failed files.', 'error');
-            selectedFiles = selectedFiles.filter(function(f) {
-              return failures.some(function(r) { return r.name === f.name; });
-            });
-            renderFileList();
-          } else {
-            showStatus('All uploads failed. Please check your connection and try again.', 'error');
+        var runId = null;
+        for (var attempt = 0; attempt < 30; attempt++) {
+          var runs = await ghFetch(GH_API + '/repos/' + GH_OWNER + '/' + GH_REPO +
+            '/actions/workflows/upload-to-redcap.yml/runs?per_page=5&event=workflow_dispatch');
+
+          if (runs.workflow_runs) {
+            for (var i = 0; i < runs.workflow_runs.length; i++) {
+              var run = runs.workflow_runs[i];
+              var created = new Date(run.created_at).getTime();
+              if (created >= triggerTime - 10000) {
+                runId = run.id;
+                break;
+              }
+            }
           }
-          uploadBtn.disabled = selectedFiles.length === 0;
-          dropZone.style.pointerEvents = '';
-          return;
+          if (runId) break;
+          await sleep(3000);
         }
 
-        var file = selectedFiles[idx];
-        progLabel.textContent = 'Uploading ' + file.name + '  (' + (idx + 1) + ' of ' + total + ')';
-        progInfo.textContent = formatSize(bytesUploaded) + ' / ' + formatSize(totalBytes);
+        if (!runId) throw new Error('Could not find workflow run. Check the Actions tab.');
 
-        // Set file on the hidden form
-        var dt = new DataTransfer();
-        dt.items.add(file);
-        document.getElementById('ifFile').files = dt.files;
+        // Poll until completed
+        for (var poll = 0; poll < 120; poll++) {
+          var run = await ghFetch(GH_API + '/repos/' + GH_OWNER + '/' + GH_REPO +
+            '/actions/runs/' + runId);
 
-        // Start time-based progress estimation
-        var startTime = Date.now();
-        progBar.classList.add('estimating');
-        progBar.style.width = '0%';
-        progTime.textContent = '';
+          progLabel.textContent = 'Transferring to REDCap file repository... (' + run.status + ')';
 
-        var estimateTimer = setInterval(function() {
-          var elapsed = Date.now() - startTime;
-          if (uploadSpeed > 0) {
-            var expectedMs = file.size / uploadSpeed;
-            var pct = Math.min(95, (elapsed / expectedMs) * 100);
-            progBar.style.width = pct + '%';
-            var remainMs = Math.max(0, expectedMs - elapsed);
-            progTime.textContent = 'Est. ' + formatDuration(remainMs) + ' remaining';
-          } else {
-            progTime.textContent = formatDuration(elapsed) + ' elapsed';
+          if (run.status === 'completed') {
+            return run.conclusion === 'success';
           }
-        }, 500);
-
-        var iframe = document.getElementById('uploadFrame');
-
-        // Timeout: scale with file size (min 2 min, ~30s per 100MB, max 30 min)
-        var timeoutMs = Math.max(120000, Math.min(1800000, (file.size / 100000000) * 30000));
-        var timeoutId = setTimeout(function() {
-          iframe.removeEventListener('load', onLoad);
-          clearInterval(estimateTimer);
-          markFileStatus(idx, false);
-          failures.push({ name: file.name, error: 'Timed out' });
-          uploadNext(idx + 1, total, totalBytes, bytesUploaded + file.size, succeeded, failures);
-        }, timeoutMs);
-
-        function onLoad() {
-          clearTimeout(timeoutId);
-          clearInterval(estimateTimer);
-          iframe.removeEventListener('load', onLoad);
-
-          // Learn upload speed from this file
-          var elapsed = Date.now() - startTime;
-          if (elapsed > 0 && file.size > 0) {
-            var thisSpeed = file.size / elapsed;
-            uploadSpeed = uploadSpeed > 0 ? (uploadSpeed * 0.3 + thisSpeed * 0.7) : thisSpeed;
-          }
-
-          progBar.classList.remove('estimating');
-          progBar.style.width = '100%';
-          markFileStatus(idx, true);
-          uploadNext(idx + 1, total, totalBytes, bytesUploaded + file.size, succeeded + 1, failures);
+          await sleep(5000);
         }
 
-        iframe.addEventListener('load', onLoad);
-        document.getElementById('iframeForm').submit();
+        throw new Error('Workflow timed out after 10 minutes. Check the Actions tab.');
       }
 
       // ── UI helpers ──
-      function markFileStatus(idx, ok) {
+      function markFileStatus(idx, status) {
         var row = document.getElementById('file-row-' + idx);
         if (!row) return;
         var existing = row.querySelector('.status-icon');
@@ -495,8 +511,16 @@
         if (rmBtn) rmBtn.style.display = 'none';
         var span = document.createElement('span');
         span.className = 'status-icon';
-        span.textContent = ok ? '\u2705' : '\u274C';
-        span.title = ok ? 'Uploaded' : 'Failed';
+        if (status === 'staged') {
+          span.textContent = '\u2601';
+          span.title = 'Staged on GitHub';
+        } else if (status === true) {
+          span.textContent = '\u2705';
+          span.title = 'Uploaded';
+        } else {
+          span.textContent = '\u274C';
+          span.title = 'Failed';
+        }
         row.appendChild(span);
       }
 
