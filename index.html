@@ -508,12 +508,14 @@
 
       // ── Slack notification via Cloudflare Worker (no GitHub Actions) ──
       function notifySlack(succeeded, failures, totalBytes, fileNames) {
-        if (!NOTIFY_URL || NOTIFY_URL.charAt(0) === '_') return;
+        // Use configured NOTIFY_URL, or relative /notify if served from the Worker
+        var notifyTarget = (NOTIFY_URL && NOTIFY_URL.charAt(0) !== '_') ? NOTIFY_URL : '/notify';
+        if (notifyTarget === '/notify' && window.location.hostname.indexOf('github.io') !== -1) return;
 
         var status = failures.length === 0 ? 'success' : 'failure';
         var failedNames = failures.map(function(f) { return f.name; });
 
-        fetch(NOTIFY_URL, {
+        fetch(notifyTarget, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
