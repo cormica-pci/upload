@@ -45,6 +45,12 @@
     .drop-zone p { color: var(--text-muted); margin-bottom: 0.25rem; }
     .drop-zone .hint { font-size: 0.8rem; color: #999; }
     input[type="file"] { display: none; }
+    .browse-buttons { margin-top: 0.75rem; display: flex; gap: 0.5rem; justify-content: center; }
+    .browse-btn {
+      padding: 0.4rem 1rem; border: 1px solid var(--primary); border-radius: 4px;
+      background: white; color: var(--primary); cursor: pointer; font-size: 0.85rem;
+    }
+    .browse-btn:hover { background: var(--primary); color: white; }
     .file-list { list-style: none; margin-top: 1rem; }
     .file-list li {
       display: flex; align-items: center; justify-content: space-between;
@@ -137,11 +143,16 @@
         </div>
         <div class="drop-zone" id="dropZone">
           <div class="icon">&#128206;</div>
-          <p>Drag &amp; drop files or folders here, or click to browse</p>
+          <p>Drag &amp; drop files or folders here</p>
           <p class="hint">DICOM folders, ZIP archives, images - up to 1 GB per file</p>
+          <div class="browse-buttons">
+            <button type="button" class="browse-btn" id="browseFilesBtn">Browse Files</button>
+            <button type="button" class="browse-btn" id="browseFolderBtn">Browse Folder</button>
+          </div>
         </div>
         <input type="file" id="fileInput" multiple
                accept=".dcm,.jpg,.jpeg,.png,.tiff,.tif,.pdf,.zip,.bmp,.avi,.mp4,.mov">
+        <input type="file" id="folderInput" webkitdirectory>
         <ul class="file-list" id="fileList"></ul>
         <button class="upload-btn" id="uploadBtn" disabled>Upload Files</button>
         <div class="progress-section" id="progressSection">
@@ -314,7 +325,16 @@
       var uploadSpeed = 0; // bytes/ms, learned from completed uploads
 
       // ── Drop zone ──
-      dropZone.addEventListener('click', function() { fileInput.click(); });
+      document.getElementById('browseFilesBtn').addEventListener('click', function(e) {
+        e.stopPropagation(); fileInput.click();
+      });
+      document.getElementById('browseFolderBtn').addEventListener('click', function(e) {
+        e.stopPropagation(); document.getElementById('folderInput').click();
+      });
+      document.getElementById('folderInput').addEventListener('change', function() {
+        addFiles(Array.from(this.files));
+        this.value = '';
+      });
       dropZone.addEventListener('dragover', function(e) {
         e.preventDefault(); dropZone.classList.add('drag-over');
       });
@@ -476,9 +496,9 @@
 
         var iframe = document.getElementById('uploadFrame');
 
-        // Timeout: scale with file size (min 10 min, ~3 min per 100MB, max 60 min)
-        // NHS networks typically have 5-10 Mbps upload, so 300MB can take 4-8 min
-        var timeoutMs = Math.max(600000, Math.min(3600000, (file.size / 100000000) * 180000));
+        // Timeout: scale with file size (min 10 min, ~8 min per 100MB, max 2 hours)
+        // NHS networks can be as slow as 2 Mbps upload, so 851MB could take ~57 min
+        var timeoutMs = Math.max(600000, Math.min(7200000, (file.size / 100000000) * 480000));
         var timeoutId = setTimeout(function() {
           iframe.removeEventListener('load', onLoad);
           clearInterval(estimateTimer);
