@@ -453,6 +453,8 @@
         document.getElementById('ifFile').files = dt.files;
 
         // Start time-based progress estimation
+        // Assume 5 Mbps (NHS typical) for first file, then learn from actual speed
+        var assumedSpeed = uploadSpeed > 0 ? uploadSpeed : (5 * 1024 * 1024 / 8) / 1000; // bytes per ms
         var startTime = Date.now();
         progBar.classList.add('estimating');
         progBar.style.width = '0%';
@@ -460,14 +462,15 @@
 
         var estimateTimer = setInterval(function() {
           var elapsed = Date.now() - startTime;
+          var speed = uploadSpeed > 0 ? uploadSpeed : assumedSpeed;
+          var expectedMs = file.size / speed;
+          var pct = Math.min(95, (elapsed / expectedMs) * 100);
+          progBar.style.width = pct + '%';
+          var remainMs = Math.max(0, expectedMs - elapsed);
           if (uploadSpeed > 0) {
-            var expectedMs = file.size / uploadSpeed;
-            var pct = Math.min(95, (elapsed / expectedMs) * 100);
-            progBar.style.width = pct + '%';
-            var remainMs = Math.max(0, expectedMs - elapsed);
             progTime.textContent = 'Est. ' + formatDuration(remainMs) + ' remaining';
           } else {
-            progTime.textContent = formatDuration(elapsed) + ' elapsed';
+            progTime.textContent = formatDuration(elapsed) + ' elapsed - est. ' + formatDuration(remainMs) + ' remaining (large file)';
           }
         }, 500);
 
